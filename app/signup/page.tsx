@@ -36,35 +36,6 @@ export default function SignUpPage() {
     if (error) setError("")
   }
 
-  const createProfile = async (userId: string, fullName: string, retries = 3) => {
-    for (let i = 0; i < retries; i++) {
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .insert([
-            {
-              id: userId,
-              full_name: fullName,
-              color_blind_type: "normal",
-            },
-          ])
-          .select()
-
-        if (error) {
-          console.error(`Profile creation attempt ${i + 1} failed:`, error)
-          if (i === retries - 1) throw error
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-        } else {
-          console.log("Profile created successfully:", data)
-          return data
-        }
-      } catch (err) {
-        if (i === retries - 1) throw err
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-      }
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
@@ -90,7 +61,6 @@ export default function SignUpPage() {
     }
 
     try {
-      // Sign up the user
       const { data, error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -103,38 +73,24 @@ export default function SignUpPage() {
 
       if (error) {
         setError(error.message)
-        return
-      }
+      } else if (data.user) {
+        // Create user profile
+        const { error: profileError } = await supabase.from("profiles").insert([
+          {
+            id: data.user.id,
+            full_name: formData.fullName,
+            color_blind_type: "normal", // Default value, can be changed later
+          },
+        ])
 
-      if (data.user) {
-        // Wait for the session to be established
-        let sessionEstablished = false
-        let attempts = 0
-        const maxAttempts = 10
-
-        while (!sessionEstablished && attempts < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, 500))
-          const { data: sessionData } = await supabase.auth.getSession()
-          if (sessionData.session?.user?.id === data.user.id) {
-            sessionEstablished = true
-          }
-          attempts++
-        }
-
-        if (sessionEstablished) {
-          try {
-            await createProfile(data.user.id, formData.fullName)
-          } catch (profileError) {
-            console.error("Profile creation failed:", profileError)
-            // Continue anyway - profile will be created when they visit profile page
-          }
+        if (profileError) {
+          console.error("Error creating profile:", profileError)
         }
 
         // Redirect to vision setup
         router.push("/vision-setup")
       }
     } catch (error) {
-      console.error("Signup error:", error)
       setError("An unexpected error occurred")
     } finally {
       setIsLoading(false)
