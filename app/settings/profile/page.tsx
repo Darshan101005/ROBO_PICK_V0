@@ -1,223 +1,385 @@
 "use client"
 
-import { useState } from "react"
-import Link from "next/link"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { NavigationBar } from "@/components/navigation-bar"
-import { mockUser } from "@/lib/data"
-import { ArrowLeft, User, Mail, Calendar, MapPin, Save, Camera } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ArrowLeft, User, Mail, Loader2, Camera, Check } from "lucide-react"
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 
 export default function ProfilePage() {
-  const [isEditing, setIsEditing] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [formData, setFormData] = useState({
-    name: mockUser.name,
-    email: mockUser.email,
-    bio: "Passionate about fresh produce and healthy eating. Love discovering new fruits and vegetables!",
-    location: "San Francisco, CA",
-    joinDate: mockUser.joinDate,
-  })
+  const router = useRouter()
+  const supabase = createClientComponentClient()
 
-  const handleSave = async () => {
-    setIsSaving(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    setIsSaving(false)
-    setIsEditing(false)
+  const [profile, setProfile] = useState({
+    full_name: "",
+    email: "",
+    color_blind_type: "normal",
+  })
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
+  const [user, setUser] = useState<any>(null)
+
+  useEffect(() => {
+    loadProfile()
+  }, [])
+
+  const loadProfile = async () => {
+    try {
+      setIsLoading(true)
+
+      // Get current user
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+
+      if (userError || !user) {
+        setError("Please log in to view your profile")
+        return
+      }
+
+      setUser(user)
+      setProfile((prev) => ({ ...prev, email: user.email || "" }))
+
+      // Try to get existing profile
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single()
+
+      if (profileError) {
+        if (profileError.code === "PGRST116") {
+          // Profile doesn't exist, create it
+          const fullName = user.user_metadata?.full_name || ""
+
+          const { data: newProfile, error: createError } = await supabase
+            .from("profiles")
+            .insert([
+              {
+                id: user.id,
+                full_name: fullName,
+                color_blind_type: "normal",
+              },
+            ])
+            .select()
+            .single()
+
+          if (createError) {
+            console.error("Error creating profile:", createError)
+            setError("Failed to create profile")
+          } else {
+            setProfile({
+              full_name: fullName,
+              email: user.email || "",
+              color_blind_type: "normal",
+            })
+          }
+        } else {
+          console.error("Error loading profile:", profileError)
+          setError("Failed to load profile")
+        }
+      } else {
+        // Profile exists, use it
+        setProfile({
+          full_name: profileData.full_name || "",
+          email: user.email || "",
+          color_blind_type: profileData.color_blind_type || "normal",
+        })
+      }
+    } catch (error) {
+      console.error("Error in loadProfile:", error)
+      setError("An unexpected error occurred")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleInputChange = (field: string, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setProfile((prev) => ({ ...prev, [field]: value }))
+    if (error) setError("")
+    if (success) setSuccess("")
+  }
+
+  const handleSave = async () => {
+    if (!user) {
+      setError("Please log in to save your profile")
+      return
+    }
+
+    setIsSaving(true)
+    setError("")
+    setSuccess("")
+
+    try {
+      const { error } = await supabase.from("profiles").upsert(
+        {
+          id: user.id,
+          full_name: profile.full_name,
+          color_blind_type: profile.color_blind_type,
+        },
+        {
+          onConflict: "id",
+        },
+      )
+
+      if (error) {
+        console.error("Error saving profile:", error)
+        setError("Failed to save profile")
+      } else {
+        setSuccess("Profile saved successfully!")
+        setTimeout(() => setSuccess(""), 3000)
+      }
+    } catch (error) {
+      console.error("Error in handleSave:", error)
+      setError("An unexpected error occurred")
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4" />
+          <p>Loading profile...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col pb-20">
-      {/* Header */}
-      <div className="bg-white shadow-sm p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <Button variant="ghost" size="icon" asChild>
-              <Link href="/settings">
-                <ArrowLeft className="w-6 h-6" />
-              </Link>
+    <div className="min-h-screen bg-gray-50">
+      {/* Desktop Layout */}
+      <div className="hidden md:block">
+        <div className="max-w-4xl mx-auto p-8">
+          <div className="mb-8">
+            <Button variant="ghost" onClick={() => router.back()} className="mb-4">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Settings
             </Button>
-            <h1 className="text-xl font-semibold text-gray-900 ml-4">Profile</h1>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Profile Settings</h1>
+            <p className="text-gray-600">Manage your personal information and preferences</p>
           </div>
-          <Button
-            onClick={() => (isEditing ? handleSave() : setIsEditing(true))}
-            disabled={isSaving}
-            className="bg-primary hover:bg-primary-600"
-          >
-            {isSaving ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-            ) : isEditing ? (
-              <Save className="w-4 h-4 mr-2" />
-            ) : (
-              "Edit"
-            )}
-            {isSaving ? "Saving..." : isEditing ? "Save" : ""}
-          </Button>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Profile Picture Section */}
+            <div className="lg:col-span-1">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Profile Picture</CardTitle>
+                  <CardDescription>Update your profile photo</CardDescription>
+                </CardHeader>
+                <CardContent className="text-center">
+                  <div className="w-32 h-32 mx-auto mb-4 relative">
+                    <Image src="/placeholder-user.jpg" alt="Profile" fill className="rounded-full object-cover" />
+                    <Button size="sm" className="absolute bottom-0 right-0 rounded-full w-10 h-10 p-0">
+                      <Camera className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <Button variant="outline" className="w-full bg-transparent">
+                    Change Photo
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Profile Information */}
+            <div className="lg:col-span-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Personal Information</CardTitle>
+                  <CardDescription>Update your personal details</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {error && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                      {error}
+                    </div>
+                  )}
+
+                  {success && (
+                    <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm flex items-center">
+                      <Check className="w-4 h-4 mr-2" />
+                      {success}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="fullName">Full Name</Label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                      <Input
+                        id="fullName"
+                        type="text"
+                        placeholder="Enter your full name"
+                        className="pl-10"
+                        value={profile.full_name}
+                        onChange={(e) => handleInputChange("full_name", e.target.value)}
+                        disabled={isSaving}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email Address</Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                      <Input id="email" type="email" className="pl-10 bg-gray-50" value={profile.email} disabled />
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Email cannot be changed. Contact support if you need to update your email.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Color Vision Type</Label>
+                    <div className="bg-gray-50 p-3 rounded-lg">
+                      <p className="text-sm text-gray-600 capitalize">
+                        {profile.color_blind_type === "normal" ? "Normal Vision" : profile.color_blind_type}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        To change your color vision type, go to Vision Settings
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <Button onClick={handleSave} disabled={isSaving} className="bg-primary hover:bg-primary-600">
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save Changes"
+                      )}
+                    </Button>
+                    <Button variant="outline" onClick={() => router.push("/settings/vision")}>
+                      Vision Settings
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 p-4 space-y-6">
-        {/* Profile Picture */}
-        <Card>
-          <CardContent className="p-6 text-center">
-            <div className="w-24 h-24 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-4 relative">
-              <User className="w-12 h-12 text-primary-600" />
-              {isEditing && (
-                <Button
-                  size="sm"
-                  className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full p-0 bg-secondary hover:bg-secondary-600"
-                >
-                  <Camera className="w-4 h-4" />
+      {/* Mobile Layout */}
+      <div className="md:hidden min-h-screen flex flex-col">
+        <div className="flex items-center p-4 bg-white border-b">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="w-6 h-6" />
+          </Button>
+          <h1 className="flex-1 text-center text-lg font-semibold">Profile</h1>
+          <div className="w-10" />
+        </div>
+
+        <div className="flex-1 p-4 space-y-6">
+          {/* Profile Picture */}
+          <Card>
+            <CardContent className="pt-6 text-center">
+              <div className="w-24 h-24 mx-auto mb-4 relative">
+                <Image src="/placeholder-user.jpg" alt="Profile" fill className="rounded-full object-cover" />
+                <Button size="sm" className="absolute bottom-0 right-0 rounded-full w-8 h-8 p-0">
+                  <Camera className="w-3 h-3" />
                 </Button>
-              )}
-            </div>
-            <h2 className="text-xl font-bold text-gray-900">{formData.name}</h2>
-            <p className="text-gray-600">{formData.email}</p>
-          </CardContent>
-        </Card>
+              </div>
+              <Button variant="outline" size="sm">
+                Change Photo
+              </Button>
+            </CardContent>
+          </Card>
 
-        {/* Personal Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Personal Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              {isEditing ? (
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => handleInputChange("name", e.target.value)}
-                  className="h-12"
-                />
-              ) : (
-                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <User className="w-5 h-5 text-gray-400" />
-                  <span>{formData.name}</span>
+          {/* Profile Form */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Personal Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
+              )}
+
+              {success && (
+                <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm flex items-center">
+                  <Check className="w-4 h-4 mr-2" />
+                  {success}
                 </div>
               )}
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              {isEditing ? (
-                <Input
-                  id="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => handleInputChange("email", e.target.value)}
-                  className="h-12"
-                />
-              ) : (
-                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <Mail className="w-5 h-5 text-gray-400" />
-                  <span>{formData.email}</span>
+              <div className="space-y-2">
+                <Label htmlFor="fullName-mobile">Full Name</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                  <Input
+                    id="fullName-mobile"
+                    type="text"
+                    placeholder="Enter your full name"
+                    className="pl-10 h-12"
+                    value={profile.full_name}
+                    onChange={(e) => handleInputChange("full_name", e.target.value)}
+                    disabled={isSaving}
+                  />
                 </div>
-              )}
-            </div>
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="location">Location</Label>
-              {isEditing ? (
-                <Input
-                  id="location"
-                  value={formData.location}
-                  onChange={(e) => handleInputChange("location", e.target.value)}
-                  className="h-12"
-                />
-              ) : (
-                <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                  <MapPin className="w-5 h-5 text-gray-400" />
-                  <span>{formData.location}</span>
+              <div className="space-y-2">
+                <Label htmlFor="email-mobile">Email Address</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                  <Input
+                    id="email-mobile"
+                    type="email"
+                    className="pl-10 h-12 bg-gray-50"
+                    value={profile.email}
+                    disabled
+                  />
                 </div>
-              )}
-            </div>
+                <p className="text-xs text-gray-500">Email cannot be changed</p>
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="bio">Bio</Label>
-              {isEditing ? (
-                <Textarea
-                  id="bio"
-                  value={formData.bio}
-                  onChange={(e) => handleInputChange("bio", e.target.value)}
-                  className="min-h-[100px]"
-                  placeholder="Tell us about yourself..."
-                />
-              ) : (
-                <div className="p-3 bg-gray-50 rounded-lg">
-                  <span className="text-gray-700">{formData.bio}</span>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Account Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Account Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <Calendar className="w-5 h-5 text-gray-400" />
-                <div>
-                  <span className="font-medium">Member Since</span>
-                  <p className="text-sm text-gray-600">
-                    {new Date(formData.joinDate).toLocaleDateString("en-US", {
-                      year: "numeric",
-                      month: "long",
-                      day: "numeric",
-                    })}
+              <div className="space-y-2">
+                <Label>Color Vision Type</Label>
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <p className="text-sm text-gray-600 capitalize">
+                    {profile.color_blind_type === "normal" ? "Normal Vision" : profile.color_blind_type}
                   </p>
+                  <p className="text-xs text-gray-500 mt-1">Change in Vision Settings</p>
                 </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <span className="font-medium">Color Vision Type</span>
-                <p className="text-sm text-gray-600 capitalize">
-                  {mockUser.colorBlindType?.replace(/([A-Z])/g, " $1").trim() || "Not set"}
-                </p>
+              <div className="space-y-3">
+                <Button
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="w-full h-12 bg-primary hover:bg-primary-600"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+                <Button variant="outline" onClick={() => router.push("/settings/vision")} className="w-full h-12">
+                  Vision Settings
+                </Button>
               </div>
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/settings/vision">Change</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Danger Zone */}
-        <Card className="border-red-200">
-          <CardHeader>
-            <CardTitle className="text-red-600">Danger Zone</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 bg-red-50 rounded-lg border border-red-200">
-              <h4 className="font-medium text-red-800 mb-2">Delete Account</h4>
-              <p className="text-sm text-red-600 mb-4">
-                Permanently delete your account and all associated data. This action cannot be undone.
-              </p>
-              <Button variant="destructive" size="sm">
-                Delete Account
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       </div>
-
-      <NavigationBar />
     </div>
   )
 }
